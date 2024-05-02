@@ -1,0 +1,533 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Sun Oct 11 18:17:12 2020
+
+@author: Julia
+"""
+
+# -*- coding: utf-8 -*-
+"""
+Created on Sun Oct 11 16:47:37 2020
+
+@author: Julia Jessica
+"""
+
+import cv2
+
+import matplotlib.pyplot as plt
+
+from PIL import Image
+import numpy as np
+import matplotlib.cm as cm
+from skimage import io
+import matplotlib.pyplot as plt
+import matplotlib.cm as cm
+import pandas as pd
+import numpy as np
+import math
+import pickle
+from PIL import Image
+l_size = 7
+KdDFRO = 20e-9
+lcDFRO = l_size
+
+#uncomment for random model
+#sf = 0.00000000001
+xrange = 250
+yrange = xrange
+one_size = xrange-1
+array = np.zeros((xrange+1,yrange+1))
+
+fract_flow = +0.0
+fract_mem = 0.0
+import cv2
+from mpl_toolkits.mplot3d.art3d import Line3D
+
+#xlsx with the neutrophil trajectory
+label = 'nikitin001-1.xlsx'
+
+#we also need an image where we have drawn the clot edges to model neutrophil interaction with clot edges
+clotdir = 'nikitin001-clot.tif'
+
+#direction for a certain donor
+cdir = r'F:\COPASI model sperm\Models\nikitin001'
+path_centes = cdir + r'/'+label
+data_centes = pd.read_excel(path_centes)
+obstacle_file = cdir + r'/'+clotdir
+
+#a file where we save the distances, full model and random
+file_name_random = r'C:\Users\Julia\Desktop\COPASI model sperm\Models\random_dst.pkl'
+
+file_name_exp = r'C:\Users\Julia\Desktop\COPASI model sperm\Models\exp_dst.pkl'
+
+
+#here we have concentrations of chemoattractant for each point, calculated from COMSOL multiphysics
+dump_file = cdir + r'/'+'dump_array.txt'
+vmean_data_centes = []
+phis = []
+
+#size of our clot image, in pixels
+pixsize = 278
+
+#microns per pixel
+micron_per_pix = 0.46
+import csv
+
+import pickle
+import os
+
+
+def concatenate_items_from_pickle(file_name):
+    # Ensure the pickle file exists before trying to read from it
+    if not os.path.exists(file_name):
+        print(f"File {file_name} does not exist.")
+        return []
+
+    # Load the dictionary from the pickle file
+    with open(file_name, 'rb') as f:
+        data_dict = pickle.load(f)
+
+    # Concatenate all the items in the dictionary into a big list
+    big_list = []
+    for key, value in data_dict.items():
+        if len(value):  # Ensure the item is a list before concatenating
+            big_list.extend(list(value))
+        else:
+            print(f"Item associated with key '{key}' is not a list. Skipping...")
+            print(value)
+
+    return big_list
+
+
+def update_pickle_file(list1, label_string, file_name):
+    # Check if the pickle dump file exists
+    if os.path.exists(file_name):
+        # If yes, load the file
+        with open(file_name, 'rb') as f:
+            data_dict = pickle.load(f)
+    else:
+        # If not, create a dictionary
+        data_dict = {}
+
+    # Check if the label_string key exists in the dictionary
+    # If not, or if the value associated with label_string is different, update it
+    data_dict[label_string] = list1
+
+    # Save the dictionary back to the pickle file
+    with open(file_name, 'wb') as f:
+        pickle.dump(data_dict, f)
+
+# Example usage
+
+
+# Constants
+m, n = xrange, yrange  # Size of the matrix
+
+# 1. Read the obstacle locations from the .csv file
+obstacle_locations = []
+
+
+
+def get_obstacles(IMAGE_PATH, RESIZE_MATRIX):
+
+    # Open the image
+    with Image.open(IMAGE_PATH) as img:
+        # Ensure the image is in 'RGB' mode (optional, but sometimes necessary for TIFFs)
+         
+        resize = np.shape(RESIZE_MATRIX)    
+        # Resize the image
+        resized_img = np.array(img.resize(resize, Image.ANTIALIAS))
+        resized_img[resized_img!=0]=1
+    return np.array(resized_img)
+
+
+    
+
+
+
+def get_normal(x, y, arr):
+    """Return a rough estimate of the surface normal at (x, y)."""
+    neighbors = [(x-1, y), (x+1, y), (x, y-1), (x, y+1), 
+                 (x-1, y-1), (x+1, y+1), (x-1, y+1), (x+1, y-1)]
+    nx, ny = 0, 0
+    width = np.shape(arr)[0]
+    height = np.shape(arr)[1]
+    for nx_, ny_ in neighbors:
+        if 0 <= nx_ < width and 0 <= ny_ < height and arr[nx_][ny_] == 1:
+            nx += (x - nx_)
+            ny += (y - ny_)
+    
+    # Normalize the normal vector
+    length = np.sqrt(nx**2 + ny**2)
+    if length == 0:
+        return 0, 0
+    return nx / length, ny / length
+
+def reflect(dx, dy, nx, ny):
+    """Reflect the direction (dx, dy) off the normal (nx, ny)."""
+    dot_product = dx*nx + dy*ny
+    rx = dx - 2 * dot_product * nx
+    ry = dy - 2 * dot_product * ny
+    return rx, ry
+
+def get_new_velocity(position, velocity, matrix_check):
+    # Check for collisions and adjust velocity
+    x, y = int(position[1]),int(position[0])
+    dx, dy = velocity
+    newx = int(np.around(x + dx))
+    newy = int(np.around(y + dy))
+
+    m, n = np.shape(matrix_check)
+    c1 = 1
+    if matrix_check[newx, newy] == 1:    
+        dy= -dy*c1
+        dx = -dx*c1
+    else:    
+        if matrix_check[newx, y] == 1:
+            dx = -dx*c1
+        if matrix_check[x, newy] == 1:    
+            dy= -dy*c1
+      
+    nx, ny = get_normal(int(newx), int(newy), matrix_check)
+        
+    #dx, dy = reflect(dx, dy, nx, ny)
+    return [dx, dy]
+
+
+
+
+#kernel = np.ones((5, 5), np.uint8)
+with open(dump_file, 'rb') as f:
+   array = pickle.load(f)
+   
+# 2. Create matrix and mark the locations of obstacles
+matrix_obstacle_locations = get_obstacles(obstacle_file, array)
+
+kernel = np.ones((5,5))    
+     
+array[array<0] = 0 
+fig = plt.figure()
+ax = fig.add_subplot(111, projection='3d')
+
+ax.set_xticklabels([]) 
+ax.set_yticklabels([]) 
+
+ax.set_zticklabels([]) 
+# Get the x, y coordinates of the trajectory
+x_traj, y_traj = data_centes.iloc[2:, 0]*xrange/pixsize, data_centes.iloc[2:, 1]*xrange/pixsize
+
+
+
+# Get the z values along the trajectory
+z_traj = array[x_traj.astype(int), y_traj.astype(int)]
+
+
+# Plot the trajectory
+ax.plot(x_traj[1:], y_traj[1:], z_traj[1:], marker='o')
+
+#ax.plot(x_traj[0],y_traj[0],0,alpha = 0)
+ax.plot(x_traj[0:1],y_traj[0:1],z_traj[0:1], marker = 'o', color = 'g', markersize=10)
+for xi, yi, zi in zip(x_traj, y_traj, z_traj):
+    line = Line3D(*zip((xi, yi, zi), (xi, yi, -0.0)),   markevery=(1, 1), color = 'r')
+    ax.add_line(line)
+    
+ax.legend()
+# Set the labels
+
+plt.show()
+
+
+import numpy as np
+
+import numpy as np
+
+def distance(point1, point2):
+    """Compute Euclidean distance between two points."""
+    
+    q = np.sqrt((point1[0] - point2[0]) ** 2 + (point1[1] - point2[1]) ** 2)
+    return q
+def trajectory_length(trajectory):
+    """Compute total length of a trajectory."""
+    return sum(distance(trajectory[i], trajectory[i+1]) for i in range(len(trajectory)-1))
+
+
+def trajectory_distances(trajectory1, trajectory2):
+    """Compute distances between two trajectories at each time point."""
+    
+    len1, len2 = len(trajectory1), len(trajectory2)
+    
+    # If both trajectories have the same number of points
+    if len1 == len2:
+        return [distance(p1, p2) for p1, p2 in zip(trajectory1, trajectory2)]
+    
+    # Identify the longer trajectory and its step size relative to the shorter one
+    if len1 > len2:
+        step_size = len1 // len2
+        longer_trajectory = trajectory1
+        shorter_trajectory = trajectory2
+    else:
+        step_size = len2 // len1
+        longer_trajectory = trajectory2
+        shorter_trajectory = trajectory1
+    
+    sampled_longer_trajectory = longer_trajectory[::step_size]
+    
+    sampled_longer_trajectory = np.array(sampled_longer_trajectory[0:len(shorter_trajectory)])
+    shorter_trajectory = np.array(shorter_trajectory)
+    
+    #print(sampled_longer_trajectory, '\n', shorter_trajectory)
+    return [distance(p1, p2) for p1, p2 in zip(sampled_longer_trajectory, shorter_trajectory)], len(shorter_trajectory)
+
+# Example usage
+trajectory1 = [(0, 0), (1, 1), (2, 2), (3, 3), (4, 4), (5, 5)]
+trajectory2 = [(0, 1), (2, 2), (4, 3)]
+distances = trajectory_distances(trajectory1, trajectory2)
+print(distances)  # [1.0, 1.4142135623730951, 1.4142135623730951]
+
+
+for m in range(2,data_centes.count().iloc[0]):
+
+        vel_x = -(data_centes.iloc[:,0][m-2]-data_centes.iloc[:,0][m])/2
+        vel_y = -(data_centes.iloc[:,1][m-2]-data_centes.iloc[:,1][m])/2
+        vel = np.sqrt(vel_x**2+vel_y**2)
+        phi = (np.angle(1*vel_x+1j*vel_y))
+        print(vel)    
+        phis.append(phi)           
+        vmean_data_centes.append(vel)
+        
+vmean_data_centes = np.array(vmean_data_centes)       
+v_exp =  np.mean(vmean_data_centes)*xrange/pixsize*2.0
+framerate = 5
+#time_d = 20
+resx = [3, 20e-9, 2e3,30]
+N_runs = 16
+pt0 = 0
+pt0 = int(np.round(pt0))
+resrand = [13, 20e-9, 2e-3, 120]
+q_velocity = 2
+# Note that "line.distance(point)" would be identical
+b_mem = 0.3
+dconc = 1
+def round_up_to_odd(f):
+    return math.ceil(f / 2.) * 2
+
+
+import scipy
+#norm = np.sum(np.abs(kernel_outer_y))
+
+
+
+import cv2
+from scipy import stats
+from itertools import cycle
+import math
+
+import random
+cycol = cycle('bgrcmkyw')
+from itertools import cycle
+theta_mem = 0
+runs = 0
+arrk = []
+import numpy as np
+b_flow = 0
+sf = 200
+traj_steps = len(phis)
+
+from scipy.stats import mode
+def run_single_attempt(pars = [l_size,  KdDFRO, sf, 60], runs_max = 100,disp = False, array=array):
+    n_plots = int(np.ceil(np.sqrt(runs_max)))
+    fig, ax = plt.subplots(n_plots,n_plots,figsize=(20,20))
+    l_size, KdDFRO, sf,time_d = pars
+    dst_toutes = []
+    
+    v_max = v_exp*time_d/framerate/q_velocity
+    b_mem = 1*60/2.7/time_d
+    LengthPath = traj_steps*framerate/time_d
+    ker1 = round_up_to_odd((l_size/0.45)*xrange/pixsize)-1
+    sobelkerx = cv2.getDerivKernels(1, 0, ker1)
+    #LengthPath = 7
+    #v_max = v_max/(1+b_mem+b_flow)
+    norm1 = 1/np.sum(np.abs(np.outer(sobelkerx[0], sobelkerx[1])))
+    dst = 0
+    curve = []
+    runs = 0
+    theta_mem = 0
+    v_mem = v_max*b_mem
+    LengthPath = int(np.round(LengthPath))
+    dconc = 1
+    
+    
+    dst_all = []
+    #sf = 0.0000001
+    KdDFRO = np.ones_like(array)*KdDFRO
+    array1 = array/(array+KdDFRO)
+
+    ker = round_up_to_odd(ker1//2)+1
+    sobelkerx = cv2.getDerivKernels(1, 0, ker)
+    #LengthPath = 7
+    #v_max = v_max/(1+b_mem+b_flow)
+    norm = 1/np.sum(np.abs(np.outer(sobelkerx[0], sobelkerx[1])))
+    thetas = []
+    #print(ker1)
+    #ker, ker1 = ker1, ker
+    #norm1, norm = norm, norm1
+    while runs<(runs_max): 
+    
+        macrophages_all = [[data_centes.iloc[pt0,0]*xrange/pixsize,data_centes.iloc[pt0,1]*xrange/pixsize]]
+        centers = [[data_centes.iloc[pt0,0]*xrange/pixsize,data_centes.iloc[pt0,1]*xrange/pixsize]]
+        
+        for macrophages in macrophages_all:
+            
+            gradx = [cv2.Sobel(array1,cv2.CV_64F,1,0,ksize=ker1)*norm1, cv2.Sobel(array1,cv2.CV_64F,0,1,ksize=ker)*norm]
+            """plt.imshow(gradx[1])
+            plt.show()
+            plt.figure()"""
+            xi = int(macrophages[0])
+            xj =int( macrophages[1])
+            theta1 =  np.angle(gradx[0][xi][xj]*1+gradx[1][xi][xj]*1j)
+            #theta1 = stats.vonmises_line.rvs(1e-7, size = 1)[0]
+            dst_curr_all = []
+            for p in range (0,LengthPath):
+                    #print(p)
+                    xi = int(macrophages[0])
+                    xj =int( macrophages[1])
+                    delta1 = int(np.ceil(ker*np.sqrt(2)))
+                    around1 = array1[xj-delta1:xj+delta1,xi-delta1:xi+delta1]
+                    
+                    #plt.figure()
+                    #plt.imshow(around1)
+                    #plt.show()
+                    theta_movement = np.rad2deg(theta1)
+                    #print(theta_movement)
+                    #theta_movement = 70
+                    around1=scipy.ndimage.rotate(around1, theta_movement, reshape=True)
+                    
+                    
+                    size = np.min(np.shape(around1))//2
+                    
+                    gradx = [cv2.Sobel(around1,cv2.CV_64F,1,0,ksize=ker)*norm, cv2.Sobel(around1,cv2.CV_64F,0,1,ksize=ker1)*norm1]
+                    
+                    grad_mod = np.sqrt(gradx[0][size][size]**2+gradx[1][size][size]**2)/2
+                    
+                    DFRO = (grad_mod*lcDFRO+0.00000001)
+                    #print (DFRO)
+                    k = DFRO*sf
+                    #print(k)
+                    #k = (k)
+                    #print(k)
+                    c_unity = 1j
+                    theta = stats.vonmises_line.rvs(k, size = 1)[0]
+                    
+                    theta0_arr =  np.angle(gradx[0][:][:]+gradx[1][:][:]*1j)
+                    theta0 = np.deg2rad(theta_movement)+theta + np.mean(theta0_arr)
+                    
+                    theta1 = theta0#(theta0+theta_mem*b_mem)/(1+b_mem)
+                    #theta1 = theta0
+                    
+                    #point = geom.Point(xi, xj)
+                    dst_curr = []
+                    for q in range(len(data_centes)):
+                        dst_curr.append(np.sqrt((xi-data_centes.iloc[q,0]*xrange/pixsize)**2+(xj-data_centes.iloc[q,1]*xrange/pixsize)**2))
+                    #print(dst_curr)   
+                    #dst+=point.distance(line)
+                    
+
+                    dst_curr_all.append(np.min(dst_curr))
+                    
+                    velocity_x = np.cos(theta_mem)*v_max*b_mem/(1+b_mem)+(v_max*np.cos(theta1))/(1+b_mem)
+                    
+                    velocity_y = (v_max*np.sin(theta1))/(1+b_mem)+np.sin(theta_mem)*v_max*b_mem/(1+b_mem)
+                    velocity = [velocity_x, velocity_y]
+                    
+                    velocity_x, velocity_y = get_new_velocity(macrophages, velocity, matrix_obstacle_locations)
+                    
+                    
+                    macrophages[0]+=velocity_x
+                    macrophages[1]+=velocity_y
+                    thetas.append(theta1)
+                    xi = int(macrophages[0])
+                    xj = int(macrophages[1])
+                    theta_mem = theta1
+                    
+                    centers.append([xi,xj])
+                    #print(p)
+                    """
+                    for p in range (5):
+                        
+                        
+                        
+                    """    
+                    if xi>one_size-1:
+                        break 
+                        
+                        
+                    if xj>one_size-1:
+                        break
+                       
+                        
+                    if xj<0:    
+                        break
+                        
+                        
+                    if xi<0:    
+                        break
+                        
+                    
+              
+                
+            maxi = 59
+            ax[runs//n_plots][runs%n_plots].imshow(array1[:,:],cmap = 'gray', alpha = 0.9)   
+            ax[runs//n_plots][runs%n_plots].imshow(matrix_obstacle_locations[:,:], cmap = 'gray', alpha = 0.3)   
+            #ax[runs//6][runs%6].get_xaxis().set_visible(False)
+            #ax[runs//6][runs%6].get_yaxis().set_visible(False)
+            ax[runs//n_plots][runs%n_plots].get_xaxis().set_visible(False)
+            ax[runs//n_plots][runs%n_plots].get_yaxis().set_visible(False)
+            
+            centers = np.array(centers)
+            
+            ax[runs//n_plots][runs%n_plots].plot(data_centes.iloc[pt0:,0]*xrange/pixsize,data_centes.iloc[pt0:,1]*xrange/pixsize, color = 'r', linewidth=4, alpha = 1) 
+            ax[runs//n_plots][runs%n_plots].plot(centers[:,0],centers[:,1], color = 'yellow', linewidth = 4)
+            
+            #plt.figure()
+            
+            
+        if (np.shape(centers)[0]>3):
+                exptr = np.array(data_centes*xrange/pixsize)
+                dst_curr_all, len_crtraj = trajectory_distances(centers,exptr)
+                traj_1 = np.shape(exptr)[0]
+                dst_toutes.append(np.sum(dst_curr_all)/len_crtraj)
+                
+               
+                
+                runs+=1  
+
+    
+    return (dst_toutes)
+import numpy as np
+from scipy.optimize import minimize, differential_evolution
+x0 = np.array([(5,14), (5 ,11),(2e-9,400e-9), (10,600), (0.3, 1.5),(14,35)])
+
+plt.figure()
+
+distances = np.array(run_single_attempt(resx, runs_max =N_runs, disp = True))
+
+
+            
+plt.tight_layout()    
+
+plt.figure()
+
+
+distances_random1 = concatenate_items_from_pickle(file_name_random)
+
+distances1 = concatenate_items_from_pickle(file_name_exp)
+
+distances1 = np.array(distances1)
+import matplotlib.pylab as pylab
+params = {'legend.fontsize': 'x-large',
+          'figure.figsize': (15, 5),
+         'axes.labelsize': 'x-large',
+         'axes.titlesize':'x-large',
+         'xtick.labelsize':'x-large',
+         'ytick.labelsize':'x-large'}
+pylab.rcParams.update(params)
